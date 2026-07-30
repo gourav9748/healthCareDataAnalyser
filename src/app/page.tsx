@@ -1,15 +1,84 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import FileUpload from "@/components/FileUpload";
 import DataTable from "@/components/DataTable";
 import StatsPanel from "@/components/StatsPanel";
 import DocumentView from "@/components/DocumentView";
 import AgentPanel from "@/components/AgentPanel";
+import ResultView from "@/components/ResultView";
 import type { Analysis } from "@/lib/types";
 
 export default function Home() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [mode, setMode] = useState<"input" | "result">("input");
+  const [result, setResult] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  async function runPrompt(prompt: string) {
+    setMode("result");
+    setStreaming(true);
+    setError(null);
+    setResult("");
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Analysis failed.");
+      }
+      if (!res.body) {
+        setResult(await res.text());
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setResult(acc);
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return; // user went back
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }
+
+  // Back to the initial page — reset everything so the user can start again.
+  function reset() {
+    abortRef.current?.abort();
+    setAnalysis(null);
+    setMode("input");
+    setResult("");
+    setError(null);
+    setStreaming(false);
+  }
+
+  if (mode === "result") {
+    return (
+      <ResultView
+        result={result}
+        streaming={streaming}
+        error={error}
+        onBack={reset}
+      />
+    );
+  }
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
@@ -43,7 +112,7 @@ export default function Home() {
               </section>
 
               <section>
-                <AgentPanel analysis={analysis} />
+                <AgentPanel analysis={analysis} onRun={runPrompt} />
               </section>
 
               <section>
@@ -63,7 +132,7 @@ export default function Home() {
               </section>
 
               <section>
-                <AgentPanel analysis={analysis} />
+                <AgentPanel analysis={analysis} onRun={runPrompt} />
               </section>
             </>
           )}

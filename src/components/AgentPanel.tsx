@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Markdown from "@/components/Markdown";
 import type { Analysis, AgentSource, AnalysisType } from "@/lib/types";
 
 const OPTIONS: { value: AnalysisType; label: string }[] = [
@@ -33,26 +32,27 @@ function toSource(analysis: Analysis): AgentSource {
   };
 }
 
-export default function AgentPanel({ analysis }: { analysis: Analysis }) {
+interface Props {
+  analysis: Analysis;
+  onRun: (prompt: string) => void;
+}
+
+export default function AgentPanel({ analysis, onRun }: Props) {
   const [analysisType, setAnalysisType] = useState<AnalysisType>("summary");
   const [question, setQuestion] = useState("");
   const [prompt, setPrompt] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
-  const [streaming, setStreaming] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Changing the type/question invalidates a previously built prompt.
   function invalidate() {
     setPrompt(null);
-    setResult(null);
     setError(null);
   }
 
   async function buildPromptText() {
     setBuilding(true);
     setError(null);
-    setResult(null);
     try {
       const res = await fetch("/api/agent/prompt", {
         method: "POST",
@@ -73,49 +73,13 @@ export default function AgentPanel({ analysis }: { analysis: Analysis }) {
     }
   }
 
-  async function runAnalysis() {
-    if (!prompt?.trim()) return;
-    setStreaming(true);
-    setError(null);
-    setResult("");
-    try {
-      const res = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error ?? "Analysis failed.");
-      }
-      if (!res.body) {
-        setResult(await res.text());
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let acc = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        setResult(acc);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-    } finally {
-      setStreaming(false);
-    }
-  }
-
   const needsQuestion = analysisType === "custom" && !question.trim();
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-lg font-semibold text-slate-800">Analyse with AI agent</h2>
       <p className="mt-1 text-sm text-slate-500">
-        Build the prompt, tweak it if you like, then run it — the response streams
-        in live.
+        Build the prompt, tweak it if you like, then run it.
       </p>
 
       {/* Step 1: choose analysis type + build the prompt */}
@@ -137,7 +101,7 @@ export default function AgentPanel({ analysis }: { analysis: Analysis }) {
 
         <button
           onClick={buildPromptText}
-          disabled={building || streaming || needsQuestion}
+          disabled={building || needsQuestion}
           className="rounded-lg border border-brand-600 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {building ? "Building…" : prompt === null ? "Build prompt" : "Rebuild prompt"}
@@ -171,11 +135,11 @@ export default function AgentPanel({ analysis }: { analysis: Analysis }) {
           />
           <div className="mt-2 flex items-center gap-3">
             <button
-              onClick={runAnalysis}
-              disabled={streaming || !prompt.trim()}
+              onClick={() => prompt.trim() && onRun(prompt)}
+              disabled={!prompt.trim()}
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {streaming ? "Analysing…" : "Run analysis"}
+              Run analysis
             </button>
             <span className="text-xs text-slate-400">
               {prompt.length.toLocaleString()} characters
@@ -185,16 +149,6 @@ export default function AgentPanel({ analysis }: { analysis: Analysis }) {
       )}
 
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-
-      {result !== null && (
-        <div className="mt-4 max-h-[32rem] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
-          {result === "" && streaming ? (
-            <p className="text-sm text-slate-400">Generating…</p>
-          ) : (
-            <Markdown>{result}</Markdown>
-          )}
-        </div>
-      )}
     </div>
   );
 }
