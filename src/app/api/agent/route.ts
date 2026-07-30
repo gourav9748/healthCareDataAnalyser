@@ -4,6 +4,9 @@ import { openGeminiStream, geminiTextFromEvent } from "@/lib/gemini";
 import type { AgentRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
+// Allow long, streamed analyses up to 60s (the Vercel Hobby-plan maximum)
+// before the function is terminated. Raise on Pro/Enterprise if needed.
+export const maxDuration = 60;
 
 const MAX_PROMPT = 100_000;
 
