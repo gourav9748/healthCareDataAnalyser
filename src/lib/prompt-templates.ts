@@ -23,15 +23,32 @@ export type Templates = Record<string, string>;
  * Edge Config is not configured, empty, or unreachable — so the app always
  * works even before an admin customises anything.
  */
+const FOOTER =
+  "Important: this data may relate to real patients. Do not fabricate values. Any conclusions are exploratory and not medical advice.";
+
 export const DEFAULT_TEMPLATES: Templates = {
-  summary:
-    "You are a clinical data analyst. Using only the information below, write a concise plain-language summary of what this data contains, note its quality (missing values, gaps, outliers), and give 3-5 observations a clinician or analyst should note.",
-  "risk-factors":
-    "You are a clinical data analyst. Based on the information below, identify which variables or themes are most likely to be relevant risk factors or predictors, explain your reasoning, and suggest what further analysis would confirm them. Be explicit that this is exploratory and not a diagnosis.",
-  anomalies:
-    "You are a data quality specialist. Inspect the information below and flag anomalies: implausible values, suspicious distributions, high missingness, inconsistent categories, or contradictory statements. For each, state where it occurs, the concern, and a recommended remediation.",
-  custom:
-    "You are a clinical data analyst. Answer the user's question using only the information below. If it is insufficient to answer, say so and state what additional data you would need.",
+  summary: `You are a clinical data analyst. Using only the information below, write a concise plain-language summary of what this data contains, note its quality (missing values, gaps, outliers), and give 3-5 observations a clinician or analyst should note.
+
+{{data}}
+
+${FOOTER}`,
+  "risk-factors": `You are a clinical data analyst. Based on the information below, identify which variables or themes are most likely to be relevant risk factors or predictors, explain your reasoning, and suggest what further analysis would confirm them. Be explicit that this is exploratory and not a diagnosis.
+
+{{data}}
+
+${FOOTER}`,
+  anomalies: `You are a data quality specialist. Inspect the information below and flag anomalies: implausible values, suspicious distributions, high missingness, inconsistent categories, or contradictory statements. For each, state where it occurs, the concern, and a recommended remediation.
+
+{{data}}
+
+${FOOTER}`,
+  custom: `You are a clinical data analyst. Answer the user's question using only the information below. If it is insufficient to answer, say so and state what additional data you would need.
+
+{{data}}
+
+User question: {{question}}
+
+${FOOTER}`,
 };
 
 /** The Edge Config key under which the admin-controlled templates are stored. */

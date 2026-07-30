@@ -122,9 +122,18 @@ export default function AdminPage() {
         </button>
       </div>
       <p className="mt-1 text-sm text-slate-500">
-        These are the default prompts users start from for each analysis type.
-        Users can still tweak the prompt per run.
+        These are the full default prompts users start from for each analysis
+        type. Users can still tweak the prompt per run.
       </p>
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+        Placeholders replaced at run time:{" "}
+        <code className="rounded bg-white px-1 py-0.5">{"{{data}}"}</code> — the
+        dataset profile / document text;{" "}
+        <code className="rounded bg-white px-1 py-0.5">{"{{question}}"}</code> —
+        the user&apos;s question (custom only). If you omit{" "}
+        <code className="rounded bg-white px-1 py-0.5">{"{{data}}"}</code>, the
+        data is appended at the end.
+      </div>
 
       {!writable && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
@@ -154,7 +163,7 @@ export default function AdminPage() {
               onChange={(e) =>
                 setTemplates((t) => ({ ...t, [key]: e.target.value }))
               }
-              rows={4}
+              rows={7}
               className="w-full rounded-lg border border-slate-300 p-3 text-sm text-slate-700 focus:border-brand-500 focus:outline-none"
             />
           </div>
