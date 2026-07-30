@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildPrompt } from "@/lib/prompts";
 import { openGeminiStream, geminiTextFromEvent } from "@/lib/gemini";
+import { getTemplates } from "@/lib/prompt-templates";
 import type { AgentRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -42,7 +43,8 @@ export async function POST(request: Request) {
 
   let prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt && body.source) {
-    prompt = buildPrompt(body as AgentRequest);
+    const templates = await getTemplates();
+    prompt = buildPrompt(body as AgentRequest, templates);
   }
   if (!prompt) {
     return NextResponse.json({ error: "No prompt provided." }, { status: 400 });

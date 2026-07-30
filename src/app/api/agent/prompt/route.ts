@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildPrompt } from "@/lib/prompts";
+import { getTemplates } from "@/lib/prompt-templates";
 import type { AgentRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -28,5 +29,6 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ prompt: buildPrompt(req) });
+  const templates = await getTemplates();
+  return NextResponse.json({ prompt: buildPrompt(req, templates) });
 }

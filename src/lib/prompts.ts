@@ -1,22 +1,12 @@
 import { MAX_TEXT } from "./extract";
+import { DEFAULT_TEMPLATES, type Templates } from "./prompt-templates";
 import type { AgentRequest, ColumnStats } from "./types";
 
 /**
- * Prompt templates live on the SERVER only. The browser sends an analysis
- * *type* (an identifier), never the prompt text itself — so the prompt can't
- * be read or tampered with from the client.
+ * Prompt templates are supplied by the caller (from the admin-controlled store,
+ * see prompt-templates.ts). The browser sends an analysis *type* (an
+ * identifier), never the prompt text itself.
  */
-const TEMPLATES: Record<string, string> = {
-  summary:
-    "You are a clinical data analyst. Using only the information below, write a concise plain-language summary of what this data contains, note its quality (missing values, gaps, outliers), and give 3-5 observations a clinician or analyst should note.",
-  "risk-factors":
-    "You are a clinical data analyst. Based on the information below, identify which variables or themes are most likely to be relevant risk factors or predictors, explain your reasoning, and suggest what further analysis would confirm them. Be explicit that this is exploratory and not a diagnosis.",
-  anomalies:
-    "You are a data quality specialist. Inspect the information below and flag anomalies: implausible values, suspicious distributions, high missingness, inconsistent categories, or contradictory statements. For each, state where it occurs, the concern, and a recommended remediation.",
-  custom:
-    "You are a clinical data analyst. Answer the user's question using only the information below. If it is insufficient to answer, say so and state what additional data you would need.",
-};
-
 function renderStats(stats: ColumnStats[]): string {
   return stats
     .map((s) => {
@@ -29,8 +19,12 @@ function renderStats(stats: ColumnStats[]): string {
     .join("\n");
 }
 
-export function buildPrompt(req: AgentRequest): string {
-  const instruction = TEMPLATES[req.analysisType] ?? TEMPLATES.summary;
+export function buildPrompt(
+  req: AgentRequest,
+  templates: Templates = DEFAULT_TEMPLATES,
+): string {
+  const instruction =
+    templates[req.analysisType] ?? templates.summary ?? DEFAULT_TEMPLATES.summary;
   const src = req.source;
   const parts = [instruction, ""];
 
