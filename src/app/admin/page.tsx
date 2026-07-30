@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 
 type Templates = Record<string, string>;
 
+/** Whether a {{name}} placeholder (any spacing) is present in the text. */
+function hasToken(text: string | undefined, name: string): boolean {
+  if (!text) return false;
+  return new RegExp(`\\{\\{\\s*${name}\\s*\\}\\}`, "i").test(text);
+}
+
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -166,6 +172,18 @@ export default function AdminPage() {
               rows={7}
               className="w-full rounded-lg border border-slate-300 p-3 text-sm text-slate-700 focus:border-brand-500 focus:outline-none"
             />
+            {!hasToken(templates[key], "data") && (
+              <p className="mt-1 text-xs text-amber-600">
+                ⚠ No <code>{"{{data}}"}</code> placeholder — the data will be
+                appended at the end of this prompt.
+              </p>
+            )}
+            {key === "custom" && !hasToken(templates[key], "question") && (
+              <p className="mt-1 text-xs text-amber-600">
+                ⚠ No <code>{"{{question}}"}</code> placeholder — the user&apos;s
+                question will be appended at the end.
+              </p>
+            )}
           </div>
         ))}
       </div>
