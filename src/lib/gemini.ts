@@ -27,7 +27,7 @@ export async function openGeminiStream(prompt: string): Promise<Response> {
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
       }),
     },
   );
@@ -67,7 +67,7 @@ export async function callGemini(prompt: string): Promise<string> {
         },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+          generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
         }),
         signal: controller.signal,
       },

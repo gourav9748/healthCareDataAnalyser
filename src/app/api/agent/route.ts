@@ -110,6 +110,16 @@ export async function POST(request: Request) {
         const decoder = new TextDecoder();
         const encoder = new TextEncoder();
         let buffer = "";
+
+        const emitLine = (line: string) => {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) return;
+          const jsonStr = trimmed.slice(5).trim();
+          if (!jsonStr || jsonStr === "[DONE]") return;
+          const text = geminiTextFromEvent(jsonStr);
+          if (text) controller.enqueue(encoder.encode(text));
+        };
+
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -118,17 +128,14 @@ export async function POST(request: Request) {
 
             let nl: number;
             while ((nl = buffer.indexOf("\n")) >= 0) {
-              const line = buffer.slice(0, nl).trim();
+              emitLine(buffer.slice(0, nl));
               buffer = buffer.slice(nl + 1);
-              if (line.startsWith("data:")) {
-                const jsonStr = line.slice(5).trim();
-                if (jsonStr && jsonStr !== "[DONE]") {
-                  const text = geminiTextFromEvent(jsonStr);
-                  if (text) controller.enqueue(encoder.encode(text));
-                }
-              }
             }
           }
+          // Flush any trailing bytes and the final line that had no newline
+          // before the stream closed (otherwise the last chunk is lost).
+          buffer += decoder.decode();
+          for (const line of buffer.split("\n")) emitLine(line);
           controller.close();
         } catch (err) {
           controller.error(err);
