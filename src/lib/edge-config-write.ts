@@ -1,8 +1,18 @@
-import { EDGE_CONFIG_KEY, type Templates } from "./prompt-templates";
+import { EDGE_CONFIG_KEY, edgeConnectionString, type Templates } from "./prompt-templates";
+
+/**
+ * The Edge/Global Config store id (ecfg_...). Uses EDGE_CONFIG_ID if set,
+ * otherwise derives it from the connection string Vercel injected.
+ */
+export function edgeConfigId(): string | undefined {
+  if (process.env.EDGE_CONFIG_ID) return process.env.EDGE_CONFIG_ID;
+  const connection = edgeConnectionString();
+  return connection?.match(/ecfg_[A-Za-z0-9]+/)?.[0];
+}
 
 /** Whether the write path (admin save) is configured. */
 export function canWriteEdgeConfig(): boolean {
-  return !!process.env.EDGE_CONFIG_ID && !!process.env.VERCEL_API_TOKEN;
+  return !!edgeConfigId() && !!process.env.VERCEL_API_TOKEN;
 }
 
 /**
@@ -11,11 +21,11 @@ export function canWriteEdgeConfig(): boolean {
  * token) rather than the read SDK. Changes propagate without a redeploy.
  */
 export async function writeTemplates(templates: Templates): Promise<void> {
-  const id = process.env.EDGE_CONFIG_ID;
+  const id = edgeConfigId();
   const token = process.env.VERCEL_API_TOKEN;
   if (!id || !token) {
     throw new Error(
-      "Edge Config write is not configured. Set EDGE_CONFIG_ID and VERCEL_API_TOKEN.",
+      "Config write is not set up. Connect a Global/Edge Config store and set VERCEL_API_TOKEN.",
     );
   }
 

@@ -1,4 +1,12 @@
-import { get } from "@vercel/edge-config";
+import { createClient } from "@vercel/edge-config";
+
+/**
+ * The read connection string. Vercel injects this when you connect a store;
+ * it is named GLOBAL_CONFIG in the current UI (formerly EDGE_CONFIG).
+ */
+export function edgeConnectionString(): string | undefined {
+  return process.env.GLOBAL_CONFIG || process.env.EDGE_CONFIG;
+}
 
 export const PROMPT_KEYS = [
   "summary",
@@ -42,8 +50,10 @@ export async function getTemplates(): Promise<Templates> {
 
   const merged: Templates = { ...DEFAULT_TEMPLATES };
   try {
-    if (process.env.EDGE_CONFIG) {
-      const stored = (await get(EDGE_CONFIG_KEY)) as Templates | undefined;
+    const connection = edgeConnectionString();
+    if (connection) {
+      const client = createClient(connection);
+      const stored = (await client.get(EDGE_CONFIG_KEY)) as Templates | undefined;
       if (stored && typeof stored === "object") {
         for (const key of PROMPT_KEYS) {
           const value = stored[key];
