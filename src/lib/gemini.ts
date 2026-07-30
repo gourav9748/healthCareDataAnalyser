@@ -2,7 +2,7 @@
  * Minimal Google Gemini client. Called server-side only, from /api/agent, so
  * GEMINI_API_KEY never reaches the browser.
  */
-const DEFAULT_MODEL = "gemini-2.0-flash";
+const DEFAULT_MODEL = "gemini-2.5-flash";
 
 interface GeminiPart {
   text?: string;
