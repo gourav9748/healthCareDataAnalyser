@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Markdown from "@/components/Markdown";
 import type { Analysis, AgentSource, AnalysisType } from "@/lib/types";
 
 const OPTIONS: { value: AnalysisType; label: string }[] = [
@@ -106,9 +107,9 @@ export default function AgentPanel({ analysis }: { analysis: Analysis }) {
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
       {result && (
-        <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
-          {result}
-        </pre>
+        <div className="mt-4 max-h-[32rem] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <Markdown>{result}</Markdown>
+        </div>
       )}
     </div>
   );
