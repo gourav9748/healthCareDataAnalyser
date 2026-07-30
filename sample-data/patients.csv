@@ -1,0 +1,16 @@
+patient_id,age,sex,bmi,systolic_bp,diastolic_bp,cholesterol,smoker,diagnosis
+P001,54,M,28.4,142,90,220,yes,hypertension
+P002,39,F,22.1,118,76,180,no,healthy
+P003,67,M,31.2,150,95,260,yes,hypertension
+P004,45,F,26.7,128,82,195,no,healthy
+P005,58,M,29.9,138,88,240,yes,pre-diabetes
+P006,72,F,24.3,145,,210,no,hypertension
+P007,33,M,21.8,120,78,175,no,healthy
+P008,61,F,33.5,155,98,275,yes,diabetes
+P009,49,M,27.2,132,84,200,no,healthy
+P010,56,F,30.1,148,92,255,yes,hypertension
+P011,41,M,25.5,125,80,190,no,healthy
+P012,68,F,32.0,152,96,268,yes,diabetes
+P013,37,M,23.4,122,79,185,no,healthy
+P014,63,F,28.8,140,89,230,no,pre-diabetes
+P015,52,M,29.3,136,86,235,yes,hypertension
