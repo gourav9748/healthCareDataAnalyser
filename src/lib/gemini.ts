@@ -8,6 +8,44 @@ interface GeminiPart {
   text?: string;
 }
 
+/**
+ * Opens a streaming (SSE) Gemini request and returns the raw upstream Response.
+ * The caller parses the `data:` events; use `geminiTextFromEvent` for that.
+ */
+export async function openGeminiStream(prompt: string): Promise<Response> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set.");
+  const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+
+  return fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+      }),
+    },
+  );
+}
+
+/** Extract the incremental text from a single Gemini SSE `data:` payload. */
+export function geminiTextFromEvent(jsonStr: string): string {
+  try {
+    const obj = JSON.parse(jsonStr);
+    return (obj?.candidates?.[0]?.content?.parts ?? [])
+      .map((p: GeminiPart) => p.text)
+      .filter(Boolean)
+      .join("");
+  } catch {
+    return "";
+  }
+}
+
 export async function callGemini(prompt: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set.");

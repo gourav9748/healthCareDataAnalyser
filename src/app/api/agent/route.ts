@@ -1,106 +1,143 @@
 import { NextResponse } from "next/server";
 import { buildPrompt } from "@/lib/prompts";
-import { callGemini } from "@/lib/gemini";
+import { openGeminiStream, geminiTextFromEvent } from "@/lib/gemini";
 import type { AgentRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+const MAX_PROMPT = 100_000;
+
+interface AgentBody {
+  prompt?: unknown;
+  source?: AgentRequest["source"];
+  analysisType?: AgentRequest["analysisType"];
+  question?: string;
+}
+
+function textStreamHeaders() {
+  return {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+  };
+}
+
 /**
- * The agent endpoint — this is what the "Run analysis" button calls.
+ * The agent endpoint — streams the analysis back to the browser as it is
+ * generated. Accepts a final `prompt` (possibly edited by the user); if none is
+ * given it builds one from the structured request. Keys stay server-side.
  *
- * The browser POSTs an analysis TYPE and the data profile here. This route
- * (server-side) builds the real prompt and runs it through an agent. Keys and
- * prompt templates stay on the server and never reach the browser.
- *
- * Resolution order:
- *   1. External agent proxy, if AGENT_ENDPOINT + AGENT_API_KEY are set.
- *   2. Built-in Gemini agent, if GEMINI_API_KEY is set.
- *   3. Fallback: return the prompt the server would have sent (dev mode).
+ * Resolution order: external agent proxy → Gemini (streamed) → fallback.
  */
 export async function POST(request: Request) {
-  let req: AgentRequest;
+  let body: AgentBody;
   try {
-    req = (await request.json()) as AgentRequest;
+    body = (await request.json()) as AgentBody;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const src = req?.source;
-  const hasContent =
-    src &&
-    ((src.kind === "tabular" && src.stats?.length) ||
-      (src.kind === "document" && src.text?.trim()));
-  if (!hasContent) {
+  let prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt && body.source) {
+    prompt = buildPrompt(body as AgentRequest);
+  }
+  if (!prompt) {
+    return NextResponse.json({ error: "No prompt provided." }, { status: 400 });
+  }
+  if (prompt.length > MAX_PROMPT) {
     return NextResponse.json(
-      { error: "No content provided. Upload and analyse a file first." },
-      { status: 400 },
+      { error: `Prompt too long (max ${MAX_PROMPT} characters).` },
+      { status: 413 },
     );
   }
 
-  const prompt = buildPrompt(req);
-
+  // 1. External agent proxy (optional override) — delivered as one chunk.
   const endpoint = process.env.AGENT_ENDPOINT;
   const externalKey = process.env.AGENT_API_KEY;
-  const hasExternalAgent = endpoint && externalKey && externalKey !== "replace-me";
-
-  // 1. External agent proxy (optional override) ----------------------------
-  if (hasExternalAgent) {
-    const timeoutMs = Number(process.env.AGENT_TIMEOUT_SECONDS ?? 45) * 1000;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (endpoint && externalKey && externalKey !== "replace-me") {
     try {
-      const agentRes = await fetch(endpoint!, {
+      const r = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${externalKey}`,
         },
-        body: JSON.stringify({ prompt, analysisType: req.analysisType }),
-        signal: controller.signal,
+        body: JSON.stringify({ prompt }),
       });
-
-      if (!agentRes.ok) {
-        const detail = await agentRes.text().catch(() => "");
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
         return NextResponse.json(
-          { error: `Agent returned ${agentRes.status}.`, detail: detail.slice(0, 500) },
+          { error: `Agent returned ${r.status}.` },
           { status: 502 },
         );
       }
-
-      const data = await agentRes.json().catch(() => ({}));
-      const result =
+      const text =
         data.result ?? data.output ?? data.text ?? data.message ?? JSON.stringify(data);
-      return NextResponse.json({ configured: true, provider: "external", result });
-    } catch (err) {
-      const aborted = err instanceof Error && err.name === "AbortError";
-      return NextResponse.json(
-        { error: aborted ? "Agent request timed out." : "Failed to reach the agent." },
-        { status: aborted ? 504 : 502 },
-      );
-    } finally {
-      clearTimeout(timer);
+      return new Response(String(text), { headers: textStreamHeaders() });
+    } catch {
+      return NextResponse.json({ error: "Failed to reach the agent." }, { status: 502 });
     }
   }
 
-  // 2. Built-in Gemini agent -----------------------------------------------
+  // 2. Gemini (streamed) ----------------------------------------------------
   if (process.env.GEMINI_API_KEY) {
+    let upstream: Response;
     try {
-      const result = await callGemini(prompt);
-      return NextResponse.json({ configured: true, provider: "gemini", result });
+      upstream = await openGeminiStream(prompt);
     } catch (err) {
       return NextResponse.json(
         { error: err instanceof Error ? err.message : "Gemini request failed." },
         { status: 502 },
       );
     }
+
+    if (!upstream.ok || !upstream.body) {
+      const data = await upstream.json().catch(() => ({}));
+      return NextResponse.json(
+        { error: data?.error?.message ?? `Gemini returned ${upstream.status}.` },
+        { status: 502 },
+      );
+    }
+
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const reader = upstream.body!.getReader();
+        const decoder = new TextDecoder();
+        const encoder = new TextEncoder();
+        let buffer = "";
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let nl: number;
+            while ((nl = buffer.indexOf("\n")) >= 0) {
+              const line = buffer.slice(0, nl).trim();
+              buffer = buffer.slice(nl + 1);
+              if (line.startsWith("data:")) {
+                const jsonStr = line.slice(5).trim();
+                if (jsonStr && jsonStr !== "[DONE]") {
+                  const text = geminiTextFromEvent(jsonStr);
+                  if (text) controller.enqueue(encoder.encode(text));
+                }
+              }
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
+
+    return new Response(stream, { headers: textStreamHeaders() });
   }
 
   // 3. Fallback: not configured --------------------------------------------
-  return NextResponse.json({
-    configured: false,
-    prompt,
-    result:
-      "⚠️ Agent not configured. Set GEMINI_API_KEY (or an AGENT_ENDPOINT + AGENT_API_KEY) in your environment to get real analysis. Below is the exact prompt this server would send:\n\n" +
+  return new Response(
+    "⚠️ Agent not configured. Set GEMINI_API_KEY in your environment to get real analysis. Below is the prompt this server would send:\n\n" +
       prompt,
-  });
+    { headers: textStreamHeaders() },
+  );
 }
