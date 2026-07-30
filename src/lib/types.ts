@@ -23,7 +23,9 @@ export interface CategoricalStats {
 
 export type ColumnStats = NumericStats | CategoricalStats;
 
-export interface Dataset {
+/** A CSV / spreadsheet upload: structured rows and columns. */
+export interface TabularDataset {
+  kind: "tabular";
   filename: string;
   columns: string[];
   rowCount: number;
@@ -32,15 +34,48 @@ export interface Dataset {
   stats: ColumnStats[];
 }
 
+export type DocumentFileType = "pdf" | "docx";
+
+/** A PDF / Word upload: unstructured text extracted from the document. */
+export interface DocumentDataset {
+  kind: "document";
+  filename: string;
+  fileType: DocumentFileType;
+  charCount: number;
+  wordCount: number;
+  pageCount: number | null;
+  /** Whether `text` was truncated from a longer document. */
+  truncated: boolean;
+  /** Extracted text (capped) — used for the preview and the agent prompt. */
+  text: string;
+}
+
+export type Analysis = TabularDataset | DocumentDataset;
+
 export type AnalysisType = "summary" | "risk-factors" | "anomalies" | "custom";
+
+/** The trimmed payload the browser sends to /api/agent. */
+export type AgentSource =
+  | {
+      kind: "tabular";
+      filename: string;
+      columns: string[];
+      rowCount: number;
+      stats: ColumnStats[];
+    }
+  | {
+      kind: "document";
+      filename: string;
+      fileType: DocumentFileType;
+      wordCount: number;
+      charCount: number;
+      pageCount: number | null;
+      truncated: boolean;
+      text: string;
+    };
 
 export interface AgentRequest {
   analysisType: AnalysisType;
-  dataset: {
-    filename: string;
-    columns: string[];
-    rowCount: number;
-    stats: ColumnStats[];
-  };
+  source: AgentSource;
   question?: string;
 }

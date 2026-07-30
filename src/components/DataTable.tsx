@@ -1,6 +1,6 @@
-import type { Dataset } from "@/lib/types";
+import type { TabularDataset } from "@/lib/types";
 
-export default function DataTable({ dataset }: { dataset: Dataset }) {
+export default function DataTable({ dataset }: { dataset: TabularDataset }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
       <table className="min-w-full text-left text-sm">

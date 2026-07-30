@@ -1,11 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Dataset } from "@/lib/types";
+import type { Analysis } from "@/lib/types";
 
 interface Props {
-  onLoaded: (dataset: Dataset) => void;
+  onLoaded: (analysis: Analysis) => void;
 }
+
+const ACCEPT =
+  ".csv,.pdf,.docx,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export default function FileUpload({ onLoaded }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -18,15 +21,12 @@ export default function FileUpload({ onLoaded }: Props) {
     setFileName(file.name);
     setLoading(true);
     try {
-      const csv = await file.text();
-      const res = await fetch("/api/analyse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv, filename: file.name }),
-      });
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/analyse", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to analyse file.");
-      onLoaded(data as Dataset);
+      onLoaded(data as Analysis);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -49,7 +49,7 @@ export default function FileUpload({ onLoaded }: Props) {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,text/csv"
+          accept={ACCEPT}
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -57,10 +57,10 @@ export default function FileUpload({ onLoaded }: Props) {
           }}
         />
         <p className="text-sm font-medium text-slate-700">
-          {loading ? "Analysing…" : "Drop a CSV here or click to browse"}
+          {loading ? "Analysing…" : "Drop a file here or click to browse"}
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          {fileName ?? "Health dataset with a header row · up to 5 MB"}
+          {fileName ?? "CSV, PDF, or Word (.docx) · up to 10 MB"}
         </p>
       </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}

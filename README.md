@@ -1,8 +1,14 @@
 # Healthcare Data Analyser
 
-A full-stack [Next.js](https://nextjs.org) app to upload a health dataset,
-compute per-column statistics on the server, and analyse the results with an
-AI agent hosted on Vercel.
+A full-stack [Next.js](https://nextjs.org) app to upload a health dataset or
+document, profile it on the server, and analyse the results with an AI agent
+hosted on Vercel.
+
+Two input modes are supported:
+
+- **Tabular** (`.csv`) — parsed into rows/columns with per-column statistics.
+- **Document** (`.pdf`, `.docx`) — text is extracted and profiled (word/char/
+  page counts) so the agent can summarise or answer questions about it.
 
 ## Architecture
 
@@ -22,11 +28,17 @@ prompt templates server-side.
 
 ## Features
 
-- **Upload** a CSV (drag-and-drop or browse) — parsed and profiled server-side.
-- **Statistics** — per column: numeric (mean/median/min/max/std/missing) or
-  categorical (unique count, top values, missing).
+- **Upload** a CSV, PDF, or Word (`.docx`) file — drag-and-drop or browse.
+- **Tabular statistics** — per column: numeric (mean/median/min/max/std/missing)
+  or categorical (unique count, top values, missing).
+- **Document extraction** — PDF and `.docx` text is extracted (`pdf-parse` /
+  `mammoth`) and profiled with word, character, and page counts.
 - **AI analysis** — pick an analysis type (summarise, risk factors, anomalies,
-  or a custom question) and run it through your agent.
+  or a custom question) and run it through your agent for either input mode.
+
+> Notes: scanned/image-only PDFs have no selectable text and would need OCR
+> (not supported yet); legacy `.doc` files aren't supported — save as `.docx`
+> or PDF. Extracted document text is capped at 20,000 characters for analysis.
 
 ## Getting started
 

@@ -19,9 +19,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  if (!req?.dataset?.stats?.length) {
+  const src = req?.source;
+  const hasContent =
+    src &&
+    ((src.kind === "tabular" && src.stats?.length) ||
+      (src.kind === "document" && src.text?.trim()));
+  if (!hasContent) {
     return NextResponse.json(
-      { error: "No dataset profile provided. Upload and analyse a file first." },
+      { error: "No content provided. Upload and analyse a file first." },
       { status: 400 },
     );
   }

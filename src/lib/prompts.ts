@@ -1,3 +1,4 @@
+import { MAX_TEXT } from "./extract";
 import type { AgentRequest, ColumnStats } from "./types";
 
 /**
@@ -7,13 +8,13 @@ import type { AgentRequest, ColumnStats } from "./types";
  */
 const TEMPLATES: Record<string, string> = {
   summary:
-    "You are a clinical data analyst. Given the dataset profile below, write a concise plain-language summary of what this dataset contains, its data quality (missing values, outliers), and 3-5 observations a clinician or analyst should note.",
+    "You are a clinical data analyst. Using only the information below, write a concise plain-language summary of what this data contains, note its quality (missing values, gaps, outliers), and give 3-5 observations a clinician or analyst should note.",
   "risk-factors":
-    "You are a clinical data analyst. Based on the dataset profile below, identify which variables are most likely to be relevant risk factors or predictors, explain your reasoning from the distributions, and suggest what further analysis would confirm them. Be explicit that this is exploratory and not a diagnosis.",
+    "You are a clinical data analyst. Based on the information below, identify which variables or themes are most likely to be relevant risk factors or predictors, explain your reasoning, and suggest what further analysis would confirm them. Be explicit that this is exploratory and not a diagnosis.",
   anomalies:
-    "You are a data quality specialist. Inspect the dataset profile below and flag anomalies: implausible values, suspicious distributions, high missingness, or inconsistent categories. For each, state the column, the concern, and a recommended remediation.",
+    "You are a data quality specialist. Inspect the information below and flag anomalies: implausible values, suspicious distributions, high missingness, inconsistent categories, or contradictory statements. For each, state where it occurs, the concern, and a recommended remediation.",
   custom:
-    "You are a clinical data analyst. Answer the user's question using only the dataset profile below. If the profile is insufficient to answer, say so and state what additional data you would need.",
+    "You are a clinical data analyst. Answer the user's question using only the information below. If it is insufficient to answer, say so and state what additional data you would need.",
 };
 
 function renderStats(stats: ColumnStats[]): string {
@@ -30,18 +31,36 @@ function renderStats(stats: ColumnStats[]): string {
 
 export function buildPrompt(req: AgentRequest): string {
   const instruction = TEMPLATES[req.analysisType] ?? TEMPLATES.summary;
-  const { dataset } = req;
+  const src = req.source;
+  const parts = [instruction, ""];
 
-  const parts = [
-    instruction,
-    "",
-    `Dataset: ${dataset.filename}`,
-    `Rows: ${dataset.rowCount}`,
-    `Columns (${dataset.columns.length}): ${dataset.columns.join(", ")}`,
-    "",
-    "Column profile:",
-    renderStats(dataset.stats),
-  ];
+  if (src.kind === "tabular") {
+    parts.push(
+      `Dataset: ${src.filename}`,
+      `Rows: ${src.rowCount}`,
+      `Columns (${src.columns.length}): ${src.columns.join(", ")}`,
+      "",
+      "Column profile:",
+      renderStats(src.stats),
+    );
+  } else {
+    const meta = [
+      `Words: ${src.wordCount}`,
+      `Characters: ${src.charCount}`,
+      src.pageCount ? `Pages: ${src.pageCount}` : null,
+      src.truncated ? `(text truncated to first ${MAX_TEXT} characters)` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    parts.push(
+      `Document: ${src.filename} (${src.fileType.toUpperCase()})`,
+      meta,
+      "",
+      "Document text:",
+      src.text,
+    );
+  }
 
   if (req.analysisType === "custom" && req.question) {
     parts.push("", `User question: ${req.question}`);
@@ -49,7 +68,7 @@ export function buildPrompt(req: AgentRequest): string {
 
   parts.push(
     "",
-    "Important: this data may relate to real patients. Do not fabricate values. Note that any conclusions are exploratory and not medical advice.",
+    "Important: this data may relate to real patients. Do not fabricate values. Any conclusions are exploratory and not medical advice.",
   );
 
   return parts.join("\n");

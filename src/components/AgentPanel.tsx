@@ -1,16 +1,38 @@
 "use client";
 
 import { useState } from "react";
-import type { AnalysisType, Dataset } from "@/lib/types";
+import type { Analysis, AgentSource, AnalysisType } from "@/lib/types";
 
 const OPTIONS: { value: AnalysisType; label: string }[] = [
-  { value: "summary", label: "Summarise dataset" },
+  { value: "summary", label: "Summarise" },
   { value: "risk-factors", label: "Identify risk factors" },
-  { value: "anomalies", label: "Flag data anomalies" },
+  { value: "anomalies", label: "Flag anomalies" },
   { value: "custom", label: "Ask a question…" },
 ];
 
-export default function AgentPanel({ dataset }: { dataset: Dataset }) {
+function toSource(analysis: Analysis): AgentSource {
+  if (analysis.kind === "tabular") {
+    return {
+      kind: "tabular",
+      filename: analysis.filename,
+      columns: analysis.columns,
+      rowCount: analysis.rowCount,
+      stats: analysis.stats,
+    };
+  }
+  return {
+    kind: "document",
+    filename: analysis.filename,
+    fileType: analysis.fileType,
+    wordCount: analysis.wordCount,
+    charCount: analysis.charCount,
+    pageCount: analysis.pageCount,
+    truncated: analysis.truncated,
+    text: analysis.text,
+  };
+}
+
+export default function AgentPanel({ analysis }: { analysis: Analysis }) {
   const [analysisType, setAnalysisType] = useState<AnalysisType>("summary");
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -28,12 +50,7 @@ export default function AgentPanel({ dataset }: { dataset: Dataset }) {
         body: JSON.stringify({
           analysisType,
           question: analysisType === "custom" ? question : undefined,
-          dataset: {
-            filename: dataset.filename,
-            columns: dataset.columns,
-            rowCount: dataset.rowCount,
-            stats: dataset.stats,
-          },
+          source: toSource(analysis),
         }),
       });
       const data = await res.json();
@@ -46,11 +63,13 @@ export default function AgentPanel({ dataset }: { dataset: Dataset }) {
     }
   }
 
+  const subject = analysis.kind === "tabular" ? "dataset profile" : "document text";
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-lg font-semibold text-slate-800">Analyse with AI agent</h2>
       <p className="mt-1 text-sm text-slate-500">
-        Sends the dataset profile (not raw rows) to your agent for interpretation.
+        Sends the {subject} to your agent for interpretation.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -79,7 +98,7 @@ export default function AgentPanel({ dataset }: { dataset: Dataset }) {
         <input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder="e.g. Which age group has the highest average blood pressure?"
+          placeholder="e.g. What are the key findings in this document?"
           className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
         />
       )}
