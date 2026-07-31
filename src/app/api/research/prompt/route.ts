@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildResearchPrompt } from "@/lib/research-prompt";
+import { getResearchPrompt } from "@/lib/prompt-templates";
 
 export const runtime = "nodejs";
 
@@ -28,5 +29,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter a question first." }, { status: 400 });
   }
 
-  return NextResponse.json({ prompt: buildResearchPrompt(query, domain || undefined) });
+  const template = await getResearchPrompt();
+  return NextResponse.json({
+    prompt: buildResearchPrompt(query, domain || undefined, template),
+  });
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { researchWithGrounding } from "@/lib/gemini";
 import { buildResearchPrompt } from "@/lib/research-prompt";
+import { getResearchPrompt } from "@/lib/prompt-templates";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,7 +34,8 @@ export async function POST(request: Request) {
     if (!query) {
       return NextResponse.json({ error: "Enter a question to research." }, { status: 400 });
     }
-    prompt = buildResearchPrompt(query, domain || undefined);
+    const template = await getResearchPrompt();
+    prompt = buildResearchPrompt(query, domain || undefined, template);
   }
 
   if (prompt.length > MAX_QUERY) {

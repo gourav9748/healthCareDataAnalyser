@@ -19,6 +19,8 @@ export default function AdminPage() {
   const [keys, setKeys] = useState<string[]>([]);
   const [templates, setTemplates] = useState<Templates>({});
   const [defaults, setDefaults] = useState<Templates>({});
+  const [research, setResearch] = useState("");
+  const [researchDefault, setResearchDefault] = useState("");
   const [writable, setWritable] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -33,6 +35,8 @@ export default function AdminPage() {
     setKeys(data.keys ?? []);
     setTemplates(data.templates ?? {});
     setDefaults(data.defaults ?? {});
+    setResearch(data.research ?? "");
+    setResearchDefault(data.researchDefault ?? "");
     setWritable(data.writable ?? false);
     setAuthed(true);
   }
@@ -71,7 +75,7 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/prompts", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templates }),
+        body: JSON.stringify({ templates, research }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? "Save failed.");
@@ -186,6 +190,42 @@ export default function AdminPage() {
             )}
           </div>
         ))}
+      </div>
+
+      {/* Research prompt (web search grounding) */}
+      <div className="mt-8 border-t border-slate-200 pt-6">
+        <div className="mb-1 flex items-center justify-between">
+          <label className="text-sm font-semibold text-slate-800">
+            research <span className="font-normal text-slate-400">(web research page)</span>
+          </label>
+          {researchDefault && researchDefault !== research && (
+            <button
+              onClick={() => setResearch(researchDefault)}
+              className="text-xs text-brand-600 hover:underline"
+            >
+              Reset to default
+            </button>
+          )}
+        </div>
+        <div className="mb-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+          Placeholders:{" "}
+          <code className="rounded bg-white px-1 py-0.5">{"{{query}}"}</code> — the
+          user&apos;s question;{" "}
+          <code className="rounded bg-white px-1 py-0.5">{"{{domain_instruction}}"}</code>{" "}
+          — the site-restriction sentence (auto-filled, empty if no domain given).
+        </div>
+        <textarea
+          value={research}
+          onChange={(e) => setResearch(e.target.value)}
+          rows={10}
+          className="w-full rounded-lg border border-slate-300 p-3 text-sm text-slate-700 focus:border-brand-500 focus:outline-none"
+        />
+        {!hasToken(research, "query") && (
+          <p className="mt-1 text-xs text-amber-600">
+            ⚠ No <code>{"{{query}}"}</code> placeholder — the question will be
+            appended at the end.
+          </p>
+        )}
       </div>
 
       <div className="mt-6 flex items-center gap-3">

@@ -51,39 +51,72 @@ User question: {{question}}
 ${FOOTER}`,
 };
 
-/** The Edge Config key under which the admin-controlled templates are stored. */
+/** Key under which the research prompt is stored (inside the same object). */
+export const RESEARCH_KEY = "research";
+
+/**
+ * Default research prompt (web search grounding). Placeholders filled at build
+ * time: {{domain_instruction}} (the domain restriction, empty if none) and
+ * {{query}} (the user's question).
+ */
+export const DEFAULT_RESEARCH_PROMPT = `You are a meticulous healthcare information researcher. Use Google Search to find authoritative, current information to answer the question below.
+
+{{domain_instruction}}
+
+Rules:
+- Quote the key facts VERBATIM from the source in quotation marks — especially regulated details like reimbursement restrictions, eligibility criteria, stopping rules, dosing, and prices. Do not paraphrase these.
+- Do not infer, assume, or fill in gaps. Use only what the sources actually state.
+- If the specific information cannot be found in the sources, say clearly that it was not found.
+- Where a document has an identifier (e.g. a NICE technology appraisal number like TA986), state it.
+- End with a one-line reminder that this is retrieved information and should be verified against the official source.
+
+Question: {{query}}`;
+
+/** The Edge Config key under which the admin-controlled prompts are stored. */
 export const EDGE_CONFIG_KEY = "promptTemplates";
 
 const CACHE_MS = 30_000;
 let cache: { at: number; value: Templates } | null = null;
 
-/**
- * Returns the effective templates: admin overrides from Edge Config merged over
- * the built-in defaults. Cached briefly to avoid a lookup on every request, and
- * resilient — any failure falls back to defaults.
- */
-export async function getTemplates(): Promise<Templates> {
+/** Reads the raw stored object (all prompt keys) from Edge Config, cached. */
+async function getStored(): Promise<Templates> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
 
-  const merged: Templates = { ...DEFAULT_TEMPLATES };
+  let stored: Templates = {};
   try {
     const connection = edgeConnectionString();
     if (connection) {
       const client = createClient(connection);
-      const stored = (await client.get(EDGE_CONFIG_KEY)) as Templates | undefined;
-      if (stored && typeof stored === "object") {
-        for (const key of PROMPT_KEYS) {
-          const value = stored[key];
-          if (typeof value === "string" && value.trim()) merged[key] = value;
-        }
-      }
+      const value = (await client.get(EDGE_CONFIG_KEY)) as Templates | undefined;
+      if (value && typeof value === "object") stored = value;
     }
   } catch {
     // Ignore and use defaults.
   }
 
-  cache = { at: Date.now(), value: merged };
+  cache = { at: Date.now(), value: stored };
+  return stored;
+}
+
+/**
+ * The effective analysis templates: admin overrides merged over the built-in
+ * defaults. Resilient — any failure falls back to defaults.
+ */
+export async function getTemplates(): Promise<Templates> {
+  const stored = await getStored();
+  const merged: Templates = { ...DEFAULT_TEMPLATES };
+  for (const key of PROMPT_KEYS) {
+    const value = stored[key];
+    if (typeof value === "string" && value.trim()) merged[key] = value;
+  }
   return merged;
+}
+
+/** The effective research prompt: admin override or the built-in default. */
+export async function getResearchPrompt(): Promise<string> {
+  const stored = await getStored();
+  const value = stored[RESEARCH_KEY];
+  return typeof value === "string" && value.trim() ? value : DEFAULT_RESEARCH_PROMPT;
 }
 
 /** Drops the in-memory cache so the next read reflects a just-saved change. */

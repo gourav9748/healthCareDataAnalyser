@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/admin-auth";
 import {
+  DEFAULT_RESEARCH_PROMPT,
   DEFAULT_TEMPLATES,
   PROMPT_KEYS,
+  RESEARCH_KEY,
   clearTemplateCache,
+  getResearchPrompt,
   getTemplates,
 } from "@/lib/prompt-templates";
 import { canWriteEdgeConfig, writeTemplates } from "@/lib/edge-config-write";
@@ -17,11 +20,16 @@ export async function GET() {
   if (!isAuthed()) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
-  const templates = await getTemplates();
+  const [templates, research] = await Promise.all([
+    getTemplates(),
+    getResearchPrompt(),
+  ]);
   return NextResponse.json({
     templates,
     keys: PROMPT_KEYS,
     defaults: DEFAULT_TEMPLATES,
+    research,
+    researchDefault: DEFAULT_RESEARCH_PROMPT,
     writable: canWriteEdgeConfig(),
   });
 }
@@ -41,7 +49,7 @@ export async function PUT(request: Request) {
     );
   }
 
-  let body: { templates?: Record<string, unknown> };
+  let body: { templates?: Record<string, unknown>; research?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -66,6 +74,22 @@ export async function PUT(request: Request) {
     }
     clean[key] = value;
   }
+
+  // Research prompt (kept in the same stored object).
+  const research = body.research;
+  if (typeof research !== "string" || !research.trim()) {
+    return NextResponse.json(
+      { error: "Research prompt must be a non-empty string." },
+      { status: 422 },
+    );
+  }
+  if (research.length > MAX_TEMPLATE_CHARS) {
+    return NextResponse.json(
+      { error: `Research prompt exceeds ${MAX_TEMPLATE_CHARS} characters.` },
+      { status: 422 },
+    );
+  }
+  clean[RESEARCH_KEY] = research;
 
   try {
     await writeTemplates(clean);
