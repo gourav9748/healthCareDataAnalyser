@@ -9,6 +9,9 @@ interface Citation {
   uri: string;
 }
 
+/** Separates the streamed answer text from the trailing metadata frame. */
+const META_SEP = "\x1f";
+
 export default function ResearchPage() {
   const [query, setQuery] = useState("");
   const [domain, setDomain] = useState("");
@@ -73,17 +76,48 @@ export default function ResearchPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Research failed.");
-      setAnswer(data.text ?? "");
-      setCitations(data.citations ?? []);
-      setQueries(data.queries ?? []);
-      setOffDomain(data.offDomain ?? []);
-      setBlocked(data.blocked ?? false);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Research failed.");
+      }
+      if (!res.body) {
+        applyRaw(await res.text());
+        return;
+      }
+      // Stream the answer text; the trailing frame (after META_SEP) holds metadata.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let raw = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        raw += decoder.decode(value, { stream: true });
+        const idx = raw.indexOf(META_SEP);
+        setAnswer(idx >= 0 ? raw.slice(0, idx) : raw);
+      }
+      raw += decoder.decode();
+      applyRaw(raw);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function applyRaw(raw: string) {
+    const idx = raw.indexOf(META_SEP);
+    if (idx < 0) {
+      setAnswer(raw);
+      return;
+    }
+    setAnswer(raw.slice(0, idx));
+    try {
+      const meta = JSON.parse(raw.slice(idx + 1));
+      setCitations(meta.citations ?? []);
+      setQueries(meta.queries ?? []);
+      setOffDomain(meta.offDomain ?? []);
+    } catch {
+      // Leave citations empty if the metadata frame is malformed.
     }
   }
 

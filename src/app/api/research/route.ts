@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { callGemini, researchWithGrounding, type Citation } from "@/lib/gemini";
+import {
+  geminiGroundingFromEvent,
+  geminiTextFromEvent,
+  openGeminiStream,
+  type Citation,
+} from "@/lib/gemini";
 import { buildResearchPrompt, buildStrictPrompt } from "@/lib/research-prompt";
 import { getResearchPrompt } from "@/lib/prompt-templates";
 import { searchConfigured, siteSearch } from "@/lib/google-search";
@@ -12,7 +17,12 @@ const MAX_QUERY = 8000;
 const PER_PAGE_CHARS = 8000;
 const MAX_PAGES = 3;
 
-/** Normalise a user-supplied domain to a bare hostname (e.g. "nice.org.uk"). */
+/**
+ * The answer text streams first; then a metadata frame follows, separated by
+ * this control char (never appears in normal text). The client splits on it.
+ */
+const META_SEP = "\x1f";
+
 function cleanDomain(input: string): string {
   return input
     .trim()
@@ -22,17 +32,11 @@ function cleanDomain(input: string): string {
     .slice(0, 120);
 }
 
-/**
- * Best-effort source hostname for a citation. Grounding sets `title` to the
- * source's site (e.g. "has-sante.fr") while `uri` is a Google redirect, so we
- * prefer the title when it looks like a domain.
- */
 function sourceDomain(c: Citation): string {
   const title = (c.title || "").trim().toLowerCase();
   if (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(title)) return title.replace(/^www\./, "");
   try {
     const host = new URL(c.uri).hostname.toLowerCase().replace(/^www\./, "");
-    // Ignore Google's grounding redirect host — it's not the real source.
     if (host.endsWith("google.com")) return "";
     return host;
   } catch {
@@ -43,6 +47,85 @@ function sourceDomain(c: Citation): string {
 function isOnDomain(src: string, domain: string): boolean {
   const d = domain.toLowerCase().replace(/^www\./, "");
   return src === d || src.endsWith("." + d);
+}
+
+function textStreamHeaders() {
+  return {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+  };
+}
+
+interface StreamOpts {
+  domain: string;
+  mode: "standard" | "strict";
+  /** Provided in strict mode (known before generation); grounding fills it otherwise. */
+  fixedCitations?: Citation[];
+  fixedQueries?: string[];
+}
+
+/** Wrap a Gemini SSE response into a text stream + trailing metadata frame. */
+function streamAnswer(upstream: Response, opts: StreamOpts): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.body!.getReader();
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      let buffer = "";
+      const acc: { grounding: { citations: Citation[]; queries: string[] } | null } = {
+        grounding: null,
+      };
+
+      const emit = (line: string) => {
+        const t = line.trim();
+        if (!t.startsWith("data:")) return;
+        const json = t.slice(5).trim();
+        if (!json || json === "[DONE]") return;
+        const text = geminiTextFromEvent(json);
+        if (text) controller.enqueue(encoder.encode(text));
+        const g = geminiGroundingFromEvent(json);
+        if (g && (g.citations.length || g.queries.length)) acc.grounding = g;
+      };
+
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buffer.indexOf("\n")) >= 0) {
+            emit(buffer.slice(0, nl));
+            buffer = buffer.slice(nl + 1);
+          }
+        }
+        buffer += decoder.decode();
+        for (const line of buffer.split("\n")) emit(line);
+
+        const citations = opts.fixedCitations ?? acc.grounding?.citations ?? [];
+        const queries = opts.fixedQueries ?? acc.grounding?.queries ?? [];
+        const offDomain: string[] = [];
+        if (opts.domain && !opts.fixedCitations) {
+          const seen = new Set<string>();
+          for (const c of citations) {
+            const src = sourceDomain(c);
+            if (src && !isOnDomain(src, opts.domain) && !seen.has(src)) {
+              seen.add(src);
+              offDomain.push(src);
+            }
+          }
+        }
+
+        const meta = { citations, queries, offDomain, mode: opts.mode };
+        controller.enqueue(encoder.encode(META_SEP + JSON.stringify(meta)));
+        controller.close();
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+  });
+
+  return new Response(stream, { headers: textStreamHeaders() });
 }
 
 export async function POST(request: Request) {
@@ -90,52 +173,63 @@ export async function POST(request: Request) {
       );
     }
 
+    let pages: { url: string; text: string }[] = [];
     try {
       const hits = await siteSearch(query, domain, 6);
-      const pages: { url: string; text: string }[] = [];
+      pages = [];
       for (const hit of hits) {
         if (pages.length >= MAX_PAGES) break;
         const page = await fetchOnDomain(hit.link, domain);
         if (page && page.text) pages.push(page);
       }
-
-      if (pages.length === 0) {
-        return NextResponse.json({
-          text: `No readable content could be retrieved from ${domain} for this question. The pages may block automated access or contain no extractable text.`,
-          citations: [],
-          queries: [query],
-          domain,
-          offDomain: [],
-          blocked: false,
-          mode: "strict",
-        });
-      }
-
-      const sources = pages
-        .map((p, i) => `[${i + 1}] ${p.url}\n${p.text.slice(0, PER_PAGE_CHARS)}`)
-        .join("\n\n---\n\n");
-      const text = await callGemini(buildStrictPrompt(query, domain, sources));
-      const citations: Citation[] = pages.map((p) => ({ title: p.url, uri: p.url }));
-
-      return NextResponse.json({
-        text,
-        citations,
-        queries: [query],
-        domain,
-        offDomain: [],
-        blocked: false,
-        mode: "strict",
-      });
     } catch (e) {
       return NextResponse.json(
         { error: e instanceof Error ? e.message : "Strict search failed." },
         { status: 502 },
       );
     }
+
+    if (pages.length === 0) {
+      const msg = `No readable content could be retrieved from ${domain} for this question. The pages may block automated access or contain no extractable text.`;
+      const meta = { citations: [], queries: [query], offDomain: [], mode: "strict" };
+      return new Response(msg + META_SEP + JSON.stringify(meta), {
+        headers: textStreamHeaders(),
+      });
+    }
+
+    const sources = pages
+      .map((p, i) => `[${i + 1}] ${p.url}\n${p.text.slice(0, PER_PAGE_CHARS)}`)
+      .join("\n\n---\n\n");
+    const citations: Citation[] = pages.map((p) => ({ title: p.url, uri: p.url }));
+
+    let upstream: Response;
+    try {
+      upstream = await openGeminiStream(buildStrictPrompt(query, domain, sources), {
+        temperature: 0.2,
+      });
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "Gemini request failed." },
+        { status: 502 },
+      );
+    }
+    if (!upstream.ok || !upstream.body) {
+      const data = await upstream.json().catch(() => ({}));
+      return NextResponse.json(
+        { error: data?.error?.message ?? `Gemini returned ${upstream.status}.` },
+        { status: 502 },
+      );
+    }
+
+    return streamAnswer(upstream, {
+      domain,
+      mode: "strict",
+      fixedCitations: citations,
+      fixedQueries: [query],
+    });
   }
 
-  // ----- STANDARD MODE: Gemini grounding -----------------------------------
-  // Use the final (possibly edited) prompt if provided; otherwise build one.
+  // ----- STANDARD MODE: Gemini grounding (streamed) ------------------------
   let prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) {
     if (!query) {
@@ -144,7 +238,6 @@ export async function POST(request: Request) {
     const template = await getResearchPrompt();
     prompt = buildResearchPrompt(query, domain || undefined, template);
   }
-
   if (prompt.length > MAX_QUERY) {
     return NextResponse.json(
       { error: `Prompt too long (max ${MAX_QUERY} characters).` },
@@ -152,28 +245,25 @@ export async function POST(request: Request) {
     );
   }
 
+  let upstream: Response;
   try {
-    const result = await researchWithGrounding(prompt);
-
-    // Which cited sources fall outside the requested domain?
-    const offDomain: string[] = [];
-    if (domain) {
-      const seen = new Set<string>();
-      for (const c of result.citations) {
-        const src = sourceDomain(c);
-        if (src && !isOnDomain(src, domain) && !seen.has(src)) {
-          seen.add(src);
-          offDomain.push(src);
-        }
-      }
-    }
-    const blocked = strict && !!domain && offDomain.length > 0;
-
-    return NextResponse.json({ ...result, domain, offDomain, blocked });
+    upstream = await openGeminiStream(prompt, {
+      tools: [{ google_search: {} }],
+      temperature: 0.2,
+    });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Research failed." },
+      { error: e instanceof Error ? e.message : "Gemini request failed." },
       { status: 502 },
     );
   }
+  if (!upstream.ok || !upstream.body) {
+    const data = await upstream.json().catch(() => ({}));
+    return NextResponse.json(
+      { error: data?.error?.message ?? `Gemini returned ${upstream.status}.` },
+      { status: 502 },
+    );
+  }
+
+  return streamAnswer(upstream, { domain, mode: "standard" });
 }

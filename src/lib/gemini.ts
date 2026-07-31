@@ -12,10 +12,19 @@ interface GeminiPart {
  * Opens a streaming (SSE) Gemini request and returns the raw upstream Response.
  * The caller parses the `data:` events; use `geminiTextFromEvent` for that.
  */
-export async function openGeminiStream(prompt: string): Promise<Response> {
+export async function openGeminiStream(
+  prompt: string,
+  opts?: { tools?: unknown[]; temperature?: number },
+): Promise<Response> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set.");
   const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+
+  const payload: Record<string, unknown> = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: opts?.temperature ?? 0.3, maxOutputTokens: 4096 },
+  };
+  if (opts?.tools) payload.tools = opts.tools;
 
   return fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
@@ -25,10 +34,7 @@ export async function openGeminiStream(prompt: string): Promise<Response> {
         "Content-Type": "application/json",
         "x-goog-api-key": apiKey,
       },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
-      }),
+      body: JSON.stringify(payload),
     },
   );
 }
@@ -43,6 +49,26 @@ export function geminiTextFromEvent(jsonStr: string): string {
       .join("");
   } catch {
     return "";
+  }
+}
+
+/** Extract grounding citations + search queries from a streamed SSE chunk. */
+export function geminiGroundingFromEvent(
+  jsonStr: string,
+): { citations: Citation[]; queries: string[] } | null {
+  try {
+    const obj = JSON.parse(jsonStr);
+    const meta = obj?.candidates?.[0]?.groundingMetadata;
+    if (!meta) return null;
+    const citations: Citation[] = (meta.groundingChunks ?? [])
+      .map((c: GroundingChunk) => ({
+        title: c?.web?.title || c?.web?.uri || "source",
+        uri: c?.web?.uri || "",
+      }))
+      .filter((c: Citation) => c.uri);
+    return { citations, queries: meta.webSearchQueries ?? [] };
+  } catch {
+    return null;
   }
 }
 
