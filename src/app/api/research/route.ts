@@ -5,7 +5,7 @@ import { buildResearchPrompt } from "@/lib/research-prompt";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MAX_QUERY = 2000;
+const MAX_QUERY = 8000;
 
 /** Normalise a user-supplied domain to a bare hostname (e.g. "nice.org.uk"). */
 function cleanDomain(input: string): string {
@@ -18,23 +18,27 @@ function cleanDomain(input: string): string {
 }
 
 export async function POST(request: Request) {
-  let body: { query?: unknown; domain?: unknown };
+  let body: { query?: unknown; domain?: unknown; prompt?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const query = typeof body.query === "string" ? body.query.trim() : "";
-  const domain =
-    typeof body.domain === "string" ? cleanDomain(body.domain) : "";
-
-  if (!query) {
-    return NextResponse.json({ error: "Enter a question to research." }, { status: 400 });
+  // Use the final (possibly edited) prompt if provided; otherwise build one.
+  let prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) {
+    const query = typeof body.query === "string" ? body.query.trim() : "";
+    const domain = typeof body.domain === "string" ? cleanDomain(body.domain) : "";
+    if (!query) {
+      return NextResponse.json({ error: "Enter a question to research." }, { status: 400 });
+    }
+    prompt = buildResearchPrompt(query, domain || undefined);
   }
-  if (query.length > MAX_QUERY) {
+
+  if (prompt.length > MAX_QUERY) {
     return NextResponse.json(
-      { error: `Question too long (max ${MAX_QUERY} characters).` },
+      { error: `Prompt too long (max ${MAX_QUERY} characters).` },
       { status: 413 },
     );
   }
@@ -46,7 +50,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const prompt = buildResearchPrompt(query, domain || undefined);
     const result = await researchWithGrounding(prompt);
     return NextResponse.json(result);
   } catch (e) {

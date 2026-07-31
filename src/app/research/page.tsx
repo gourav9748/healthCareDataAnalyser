@@ -12,14 +12,43 @@ interface Citation {
 export default function ResearchPage() {
   const [query, setQuery] = useState("");
   const [domain, setDomain] = useState("");
+  const [prompt, setPrompt] = useState<string | null>(null);
+  const [building, setBuilding] = useState(false);
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [citations, setCitations] = useState<Citation[]>([]);
   const [queries, setQueries] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  async function run() {
+  // Editing the question/domain invalidates a previously built prompt.
+  function invalidate() {
+    setPrompt(null);
+    setError(null);
+  }
+
+  async function buildPrompt() {
     if (!query.trim()) return;
+    setBuilding(true);
+    setError(null);
+    setAnswer(null);
+    try {
+      const res = await fetch("/api/research/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, domain }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to build prompt.");
+      setPrompt(data.prompt);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setBuilding(false);
+    }
+  }
+
+  async function run() {
+    if (!prompt?.trim()) return;
     setLoading(true);
     setError(null);
     setAnswer(null);
@@ -29,7 +58,7 @@ export default function ResearchPage() {
       const res = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, domain }),
+        body: JSON.stringify({ prompt }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Research failed.");
@@ -67,7 +96,10 @@ export default function ResearchPage() {
           </label>
           <textarea
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              invalidate();
+            }}
             rows={3}
             placeholder="e.g. What is the reimbursement restriction of Ebglyss (lebrikizumab) for atopic dermatitis?"
             className="w-full rounded-lg border border-slate-300 p-3 text-sm text-slate-700 focus:border-brand-500 focus:outline-none"
@@ -79,25 +111,52 @@ export default function ResearchPage() {
           </label>
           <input
             value={domain}
-            onChange={(e) => setDomain(e.target.value)}
+            onChange={(e) => {
+              setDomain(e.target.value);
+              invalidate();
+            }}
             placeholder="e.g. nice.org.uk"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none"
           />
         </div>
-        <div className="flex items-center gap-3">
+        <div>
           <button
-            onClick={run}
-            disabled={loading || !query.trim()}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={buildPrompt}
+            disabled={building || loading || !query.trim()}
+            className="rounded-lg border border-brand-600 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? "Researching…" : "Search"}
+            {building ? "Building…" : prompt === null ? "Build prompt" : "Rebuild prompt"}
           </button>
-          {loading && (
-            <span className="text-xs text-slate-400">
-              Searching the web and reading sources…
-            </span>
-          )}
         </div>
+
+        {prompt !== null && (
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Prompt <span className="text-slate-400">(review / edit before searching)</span>
+            </label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={10}
+              spellCheck={false}
+              className="w-full rounded-lg border border-slate-300 p-3 font-mono text-xs leading-relaxed text-slate-700 focus:border-brand-500 focus:outline-none"
+            />
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                onClick={run}
+                disabled={loading || !prompt.trim()}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? "Researching…" : "Search"}
+              </button>
+              {loading && (
+                <span className="text-xs text-slate-400">
+                  Searching the web and reading sources…
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
