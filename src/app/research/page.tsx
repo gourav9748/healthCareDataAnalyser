@@ -15,9 +15,13 @@ export default function ResearchPage() {
   const [prompt, setPrompt] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [strict, setStrict] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [citations, setCitations] = useState<Citation[]>([]);
   const [queries, setQueries] = useState<string[]>([]);
+  const [offDomain, setOffDomain] = useState<string[]>([]);
+  const [blocked, setBlocked] = useState(false);
+  const [reveal, setReveal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Editing the question/domain invalidates a previously built prompt.
@@ -54,17 +58,22 @@ export default function ResearchPage() {
     setAnswer(null);
     setCitations([]);
     setQueries([]);
+    setOffDomain([]);
+    setBlocked(false);
+    setReveal(false);
     try {
       const res = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, domain, strict }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Research failed.");
       setAnswer(data.text ?? "");
       setCitations(data.citations ?? []);
       setQueries(data.queries ?? []);
+      setOffDomain(data.offDomain ?? []);
+      setBlocked(data.blocked ?? false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -118,6 +127,17 @@ export default function ResearchPage() {
             placeholder="e.g. nice.org.uk"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none"
           />
+          {domain.trim() && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={strict}
+                onChange={(e) => setStrict(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              Strict: hold the answer if any source falls outside this domain
+            </label>
+          )}
         </div>
         <div>
           <button
@@ -163,9 +183,50 @@ export default function ResearchPage() {
 
       {answer !== null && (
         <div className="mt-6 space-y-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <Markdown>{answer}</Markdown>
-          </div>
+          {offDomain.length > 0 && (
+            <div
+              className={`rounded-xl border p-4 text-sm ${
+                blocked
+                  ? "border-red-300 bg-red-50 text-red-800"
+                  : "border-amber-300 bg-amber-50 text-amber-800"
+              }`}
+            >
+              <p className="font-semibold">
+                {blocked
+                  ? `Answer held — sources outside ${domain} were used`
+                  : `Sources outside ${domain} were used`}
+              </p>
+              <p className="mt-1">
+                Google Search grounding cannot strictly limit to one site. These
+                sources fall outside <code>{domain}</code>:{" "}
+                {offDomain.map((d) => (
+                  <code key={d} className="mr-1 rounded bg-white/60 px-1">
+                    {d}
+                  </code>
+                ))}
+              </p>
+              <p className="mt-1">
+                {blocked
+                  ? "Treat with caution: turn off strict mode to view it, broaden the domain, or rephrase."
+                  : "The answer below may draw on these; verify against the official source."}
+              </p>
+            </div>
+          )}
+
+          {(!blocked || reveal) && (
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+              <Markdown>{answer}</Markdown>
+            </div>
+          )}
+
+          {blocked && !reveal && (
+            <button
+              onClick={() => setReveal(true)}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400"
+            >
+              Show answer anyway
+            </button>
+          )}
 
           {citations.length > 0 && (
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
