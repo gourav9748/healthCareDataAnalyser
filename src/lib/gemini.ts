@@ -46,6 +46,93 @@ export function geminiTextFromEvent(jsonStr: string): string {
   }
 }
 
+export interface Citation {
+  title: string;
+  uri: string;
+}
+
+export interface ResearchResult {
+  text: string;
+  citations: Citation[];
+  queries: string[];
+}
+
+interface GroundingChunk {
+  web?: { uri?: string; title?: string };
+}
+
+/**
+ * Answer a prompt using Gemini with Google Search grounding. Returns the answer
+ * plus the web citations Gemini grounded on. Non-streaming so the grounding
+ * metadata (citations) can be read from the response.
+ */
+export async function researchWithGrounding(prompt: string): Promise<ResearchResult> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set.");
+
+  const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const timeoutMs = Number(process.env.AGENT_TIMEOUT_SECONDS ?? 45) * 1000;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          tools: [{ google_search: {} }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+        }),
+        signal: controller.signal,
+      },
+    );
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error?.message || `Gemini returned ${res.status}.`);
+    }
+
+    const candidate = data?.candidates?.[0];
+    const text: string = (candidate?.content?.parts ?? [])
+      .map((p: GeminiPart) => p.text)
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+
+    const meta = candidate?.groundingMetadata ?? {};
+    const citations: Citation[] = (meta.groundingChunks ?? [])
+      .map((c: GroundingChunk) => ({
+        title: c?.web?.title || c?.web?.uri || "source",
+        uri: c?.web?.uri || "",
+      }))
+      .filter((c: Citation) => c.uri);
+    const queries: string[] = meta.webSearchQueries ?? [];
+
+    if (!text) {
+      const reason = data?.promptFeedback?.blockReason || candidate?.finishReason;
+      throw new Error(
+        reason ? `Gemini returned no text (reason: ${reason}).` : "Gemini returned no text.",
+      );
+    }
+
+    return { text, citations, queries };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Research request timed out.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function callGemini(prompt: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set.");

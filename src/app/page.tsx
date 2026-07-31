@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 import FileUpload from "@/components/FileUpload";
 import DataTable from "@/components/DataTable";
@@ -82,14 +83,22 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
-      <header className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">
-          Healthcare Data Analyser
-        </h1>
-        <p className="mt-1 text-slate-600">
-          Upload a health dataset or document, review the automated profile, and
-          analyse it with an AI agent.
-        </p>
+      <header className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">
+            Healthcare Data Analyser
+          </h1>
+          <p className="mt-1 text-slate-600">
+            Upload a health dataset or document, review the automated profile, and
+            analyse it with an AI agent.
+          </p>
+        </div>
+        <Link
+          href="/research"
+          className="shrink-0 rounded-lg border border-brand-600 px-3 py-1.5 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"
+        >
+          Web research →
+        </Link>
       </header>
 
       <section className="mb-8">
