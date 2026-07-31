@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
-import { researchWithGrounding, type Citation } from "@/lib/gemini";
-import { buildResearchPrompt } from "@/lib/research-prompt";
+import { callGemini, researchWithGrounding, type Citation } from "@/lib/gemini";
+import { buildResearchPrompt, buildStrictPrompt } from "@/lib/research-prompt";
 import { getResearchPrompt } from "@/lib/prompt-templates";
+import { searchConfigured, siteSearch } from "@/lib/google-search";
+import { fetchOnDomain } from "@/lib/fetch-page";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_QUERY = 8000;
+const PER_PAGE_CHARS = 8000;
+const MAX_PAGES = 3;
 
 /** Normalise a user-supplied domain to a bare hostname (e.g. "nice.org.uk"). */
 function cleanDomain(input: string): string {
@@ -56,11 +60,84 @@ export async function POST(request: Request) {
 
   const domain = typeof body.domain === "string" ? cleanDomain(body.domain) : "";
   const strict = body.strict === true;
+  const query = typeof body.query === "string" ? body.query.trim() : "";
 
+  if (!process.env.GEMINI_API_KEY) {
+    return NextResponse.json(
+      { error: "Search is not configured. Set GEMINI_API_KEY." },
+      { status: 503 },
+    );
+  }
+
+  // ----- STRICT MODE: search the site, fetch pages, answer closed-book -----
+  if (strict) {
+    if (!domain) {
+      return NextResponse.json(
+        { error: "Strict mode needs a domain to restrict to." },
+        { status: 400 },
+      );
+    }
+    if (!query) {
+      return NextResponse.json({ error: "Enter a question." }, { status: 400 });
+    }
+    if (!searchConfigured()) {
+      return NextResponse.json(
+        {
+          error:
+            "Strict search is not configured. Set GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX.",
+        },
+        { status: 503 },
+      );
+    }
+
+    try {
+      const hits = await siteSearch(query, domain, 6);
+      const pages: { url: string; text: string }[] = [];
+      for (const hit of hits) {
+        if (pages.length >= MAX_PAGES) break;
+        const page = await fetchOnDomain(hit.link, domain);
+        if (page && page.text) pages.push(page);
+      }
+
+      if (pages.length === 0) {
+        return NextResponse.json({
+          text: `No readable content could be retrieved from ${domain} for this question. The pages may block automated access or contain no extractable text.`,
+          citations: [],
+          queries: [query],
+          domain,
+          offDomain: [],
+          blocked: false,
+          mode: "strict",
+        });
+      }
+
+      const sources = pages
+        .map((p, i) => `[${i + 1}] ${p.url}\n${p.text.slice(0, PER_PAGE_CHARS)}`)
+        .join("\n\n---\n\n");
+      const text = await callGemini(buildStrictPrompt(query, domain, sources));
+      const citations: Citation[] = pages.map((p) => ({ title: p.url, uri: p.url }));
+
+      return NextResponse.json({
+        text,
+        citations,
+        queries: [query],
+        domain,
+        offDomain: [],
+        blocked: false,
+        mode: "strict",
+      });
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "Strict search failed." },
+        { status: 502 },
+      );
+    }
+  }
+
+  // ----- STANDARD MODE: Gemini grounding -----------------------------------
   // Use the final (possibly edited) prompt if provided; otherwise build one.
   let prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) {
-    const query = typeof body.query === "string" ? body.query.trim() : "";
     if (!query) {
       return NextResponse.json({ error: "Enter a question to research." }, { status: 400 });
     }
@@ -72,12 +149,6 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: `Prompt too long (max ${MAX_QUERY} characters).` },
       { status: 413 },
-    );
-  }
-  if (!process.env.GEMINI_API_KEY) {
-    return NextResponse.json(
-      { error: "Search is not configured. Set GEMINI_API_KEY." },
-      { status: 503 },
     );
   }
 

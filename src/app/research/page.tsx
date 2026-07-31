@@ -52,7 +52,13 @@ export default function ResearchPage() {
   }
 
   async function run() {
-    if (!prompt?.trim()) return;
+    // Strict mode retrieves + reads the site itself (question + domain);
+    // standard mode sends the built/edited grounding prompt.
+    const payload = strict
+      ? { query, domain, strict: true }
+      : { prompt, domain, strict: false };
+    if (strict ? !(query.trim() && domain.trim()) : !prompt?.trim()) return;
+
     setLoading(true);
     setError(null);
     setAnswer(null);
@@ -65,7 +71,7 @@ export default function ResearchPage() {
       const res = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, domain, strict }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Research failed.");
@@ -128,54 +134,80 @@ export default function ResearchPage() {
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none"
           />
           {domain.trim() && (
-            <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+            <label className="mt-2 flex items-start gap-2 text-sm text-slate-600">
               <input
                 type="checkbox"
                 checked={strict}
                 onChange={(e) => setStrict(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300"
               />
-              Strict: hold the answer if any source falls outside this domain
+              <span>
+                Strict mode — search only this site (Google Programmable Search),
+                read its pages, and answer <em>only</em> from them. Guarantees
+                on-domain sources (works only if the site allows fetching).
+              </span>
             </label>
           )}
         </div>
-        <div>
-          <button
-            onClick={buildPrompt}
-            disabled={building || loading || !query.trim()}
-            className="rounded-lg border border-brand-600 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {building ? "Building…" : prompt === null ? "Build prompt" : "Rebuild prompt"}
-          </button>
-        </div>
 
-        {prompt !== null && (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Prompt <span className="text-slate-400">(review / edit before searching)</span>
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={10}
-              spellCheck={false}
-              className="w-full rounded-lg border border-slate-300 p-3 font-mono text-xs leading-relaxed text-slate-700 focus:border-brand-500 focus:outline-none"
-            />
-            <div className="mt-2 flex items-center gap-3">
-              <button
-                onClick={run}
-                disabled={loading || !prompt.trim()}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? "Researching…" : "Search"}
-              </button>
-              {loading && (
-                <span className="text-xs text-slate-400">
-                  Searching the web and reading sources…
-                </span>
-              )}
-            </div>
+        {strict ? (
+          /* Strict mode: search the site directly, no prompt editing. */
+          <div className="flex items-center gap-3">
+            <button
+              onClick={run}
+              disabled={loading || !query.trim() || !domain.trim()}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? "Searching…" : `Search strictly on ${domain || "domain"}`}
+            </button>
+            {loading && (
+              <span className="text-xs text-slate-400">
+                Searching the site and reading pages…
+              </span>
+            )}
           </div>
+        ) : (
+          /* Standard mode: build -> edit -> search (grounding). */
+          <>
+            <div>
+              <button
+                onClick={buildPrompt}
+                disabled={building || loading || !query.trim()}
+                className="rounded-lg border border-brand-600 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {building ? "Building…" : prompt === null ? "Build prompt" : "Rebuild prompt"}
+              </button>
+            </div>
+
+            {prompt !== null && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Prompt <span className="text-slate-400">(review / edit before searching)</span>
+                </label>
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  rows={10}
+                  spellCheck={false}
+                  className="w-full rounded-lg border border-slate-300 p-3 font-mono text-xs leading-relaxed text-slate-700 focus:border-brand-500 focus:outline-none"
+                />
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    onClick={run}
+                    disabled={loading || !prompt.trim()}
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loading ? "Researching…" : "Search"}
+                  </button>
+                  {loading && (
+                    <span className="text-xs text-slate-400">
+                      Searching the web and reading sources…
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
