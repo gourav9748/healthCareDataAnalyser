@@ -32,41 +32,34 @@ export async function writeTemplates(templates: Templates): Promise<void> {
   const teamQuery = process.env.VERCEL_TEAM_ID
     ? `?teamId=${encodeURIComponent(process.env.VERCEL_TEAM_ID)}`
     : "";
-  const authHeaders = { Authorization: `Bearer ${token}` };
 
-  // Does the item already exist? Decides create vs update (upsert can 404 the
-  // very first time an item is written to a store).
-  let exists = false;
-  const check = await fetch(
-    `https://api.vercel.com/v1/edge-config/${id}/item/${encodeURIComponent(EDGE_CONFIG_KEY)}${teamQuery}`,
-    { headers: authHeaders },
-  );
-  if (check.ok) {
-    exists = true;
-  } else if (check.status !== 404) {
-    const detail = await check.text().catch(() => "");
-    throw new Error(`Edge Config check failed (${check.status}). ${detail.slice(0, 300)}`);
-  }
-
-  const res = await fetch(
-    `https://api.vercel.com/v1/edge-config/${id}/items${teamQuery}`,
-    {
+  const patch = (operation: "update" | "create") =>
+    fetch(`https://api.vercel.com/v1/edge-config/${id}/items${teamQuery}`, {
       method: "PATCH",
-      headers: { ...authHeaders, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        items: [
-          {
-            operation: exists ? "update" : "create",
-            key: EDGE_CONFIG_KEY,
-            value: templates,
-          },
-        ],
+        items: [{ operation, key: EDGE_CONFIG_KEY, value: templates }],
       }),
-    },
-  );
+    });
 
+  // Try update first; if the item doesn't exist yet, create it. This avoids
+  // relying on a separate existence check (which reports inconsistently).
+  let res = await patch("update");
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`Edge Config write failed (${res.status}). ${detail.slice(0, 300)}`);
+    if (res.status === 400 && /non-?existing/i.test(detail)) {
+      res = await patch("create");
+      if (!res.ok) {
+        const createDetail = await res.text().catch(() => "");
+        throw new Error(
+          `Edge Config create failed (${res.status}). ${createDetail.slice(0, 300)}`,
+        );
+      }
+    } else {
+      throw new Error(`Edge Config write failed (${res.status}). ${detail.slice(0, 300)}`);
+    }
   }
 }
