@@ -29,21 +29,41 @@ export async function writeTemplates(templates: Templates): Promise<void> {
     );
   }
 
-  const url = new URL(`https://api.vercel.com/v1/edge-config/${id}/items`);
-  if (process.env.VERCEL_TEAM_ID) {
-    url.searchParams.set("teamId", process.env.VERCEL_TEAM_ID);
+  const teamQuery = process.env.VERCEL_TEAM_ID
+    ? `?teamId=${encodeURIComponent(process.env.VERCEL_TEAM_ID)}`
+    : "";
+  const authHeaders = { Authorization: `Bearer ${token}` };
+
+  // Does the item already exist? Decides create vs update (upsert can 404 the
+  // very first time an item is written to a store).
+  let exists = false;
+  const check = await fetch(
+    `https://api.vercel.com/v1/edge-config/${id}/item/${encodeURIComponent(EDGE_CONFIG_KEY)}${teamQuery}`,
+    { headers: authHeaders },
+  );
+  if (check.ok) {
+    exists = true;
+  } else if (check.status !== 404) {
+    const detail = await check.text().catch(() => "");
+    throw new Error(`Edge Config check failed (${check.status}). ${detail.slice(0, 300)}`);
   }
 
-  const res = await fetch(url, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+  const res = await fetch(
+    `https://api.vercel.com/v1/edge-config/${id}/items${teamQuery}`,
+    {
+      method: "PATCH",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [
+          {
+            operation: exists ? "update" : "create",
+            key: EDGE_CONFIG_KEY,
+            value: templates,
+          },
+        ],
+      }),
     },
-    body: JSON.stringify({
-      items: [{ operation: "upsert", key: EDGE_CONFIG_KEY, value: templates }],
-    }),
-  });
+  );
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
